@@ -56,6 +56,7 @@ def download_video(update, context):
         
         # Remove repetitive formats
 
+
         # Retrieve the exact formats like mkv and mp4
         exact_formats = [stream for stream in filtered_streams if stream.mime_type.split('/')[1] in ["webm", "mp4"] or stream.mime_type.split('/')[0] in ["audio"]]
          
@@ -132,11 +133,7 @@ def download_and_send(update, context, selected_format, progress_message):
         #             context.bot.edit_message_text(chat_id=chat_id, text=f"Converting... {int(percentage)}%", message_id=progress_message.message_id)
         #             self.base = int(percentage)
 
-        # logger = MyBarLogger()
 
-        # # Write video file with callback for progress tracking
-        # clip.write_videofile(converted_video_path, codec='libx264', audio_codec='aac', threads=4, preset='ultrafast', verbose=False, logger=logger)
-        # clip.close()
 
         # Simulate uploading action
         context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
