@@ -1,10 +1,10 @@
 import os
+import subprocess
 import logging
 from dotenv import load_dotenv
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from pytube import YouTube
-from pytube.exceptions import VideoUnavailable
 from threading import Thread
 
 # Load environment variables from .env
@@ -22,18 +22,9 @@ user_data = {}
 def start(update, context):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! I'm your YouTube video downloader bot.")
 
-def filter_streams_by_extensions(yt, extensions):
-    filtered_streams = []
-    for extension in extensions:
-        streams = yt.streams.filter(file_extension=extension)
-        filtered_streams.extend(streams)
-    return filtered_streams
-
 def download_video(update, context):
     chat_id = update.effective_chat.id
 
-    # Remove the message containing the title of the video
-    context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
 
     # Show a processing message while the request is being processed
     context.bot.send_message(chat_id=chat_id, text="Processing your request...")
@@ -42,24 +33,22 @@ def download_video(update, context):
 
     try:
         yt = YouTube(video_url)
-        desired_extensions = ["webm", "mp4", "audio"]
 
-        # Get available video formats
-        filtered_streams = yt.streams.filter(progressive=True).all()
-       
-        for stream in filtered_streams:
-            print(f"{stream.subtype} + {stream.resolution} + {stream.includes_audio_track} ")
-
-        filtered_streams = [stream for stream in filtered_streams if  stream.resolution is not None and stream.includes_video_track or stream.abr  ]
-       
-      
         
-        # Remove repetitive formats
+        # get high quality videos with no audio
+        all_streams = yt.streams.filter(only_video=True,file_extension="mp4")
+    
+        test = [stream for stream in all_streams if  stream.video_codec.startswith("avc1") and stream.resolution is not None  ]
 
+        # getting high bitrate
+        audio_streams = yt.streams.filter(only_audio=True,file_extension="mp4").all()
+        target_audio = [stream for stream in audio_streams if  stream.abr == "128kbps"  ]
+ 
+     
 
-        # Retrieve the exact formats like mkv and mp4
-        exact_formats = [stream for stream in filtered_streams if stream.mime_type.split('/')[1] in ["webm", "mp4"] or stream.mime_type.split('/')[0] in ["audio"]]
-         
+        exact_formats =  test + target_audio
+     
+
 
         available_formats = [
             [InlineKeyboardButton(f"{stream.resolution if  stream.resolution  else stream.abr} - { stream.mime_type.split('/')[1]  if stream.resolution else 'mp3' } - {format_size(stream.filesize)}",
@@ -69,7 +58,7 @@ def download_video(update, context):
         
 
         # Store available formats in user_data
-        user_data[chat_id] = {'formats': exact_formats}
+        user_data[chat_id] = {'formats': exact_formats, 'audio': target_audio}
 
         # Create an inline keyboard with clickable buttons for each format
         reply_markup = InlineKeyboardMarkup(available_formats , row_width=2)
@@ -87,7 +76,6 @@ def button_click(update, context):
     query = update.callback_query
     chat_id = query.message.chat_id
     selected_format_index = int(query.data)
-
     # Remove the buttons
     context.bot.delete_message(chat_id=chat_id, message_id=user_data[chat_id]['message_id'])
 
@@ -97,43 +85,32 @@ def button_click(update, context):
 
     # Retrieve the selected format from user_data
     formats = user_data.get(chat_id, {}).get('formats')
-    selected_format = formats[selected_format_index - 1]
+    selected_video_format = formats[selected_format_index - 1]
+
+    # Retrieve audio file
+
+    audio_format = user_data.get(chat_id, {}).get('audio')[0]
 
     # Create a separate thread to download the video
-    download_thread = Thread(target=download_and_send, args=(update, context, selected_format, progress_message))
+    download_thread = Thread(target=download_and_send, args=(update, context, selected_video_format,audio_format, progress_message))
     download_thread.start()
 
-def download_and_send(update, context, selected_format, progress_message):
+def download_and_send(update, context, selected_format,audio_format, progress_message):
     try:
         chat_id = update.effective_chat.id
 
         # Simulate downloading action
         context.bot.send_chat_action(chat_id=chat_id, action='typing')
-
+        print(selected_format)
+        print(audio_format)
         # Download the selected video format
-        video_path = selected_format.download()
+        video_path = selected_format.download(filename="video_output_file.mp4")
+        audio_path = audio_format.download(filename="audio_output_file.mp4")
+        output_path = merge_video_audio(video_path,audio_path,"output.mp4")
+
 
         # Simulate converting action
         context.bot.send_chat_action(chat_id=chat_id, action='typing')
-
-        # # Convert video to a format supported by Telegram
-        # converted_video_path = video_path.replace(".mp4", "_converted.mp4")
-        # clip = VideoFileClip(video_path)
-
-        # class MyBarLogger(ProgressBarLogger):
-        #     def __init__(self, *args, **kwargs):
-        #         # Call the __init__ method of the parent class
-        #         super().__init__(*args, **kwargs)
-        #         self.base = 0
-    
-        #     def bars_callback(self, bar, attr, value, old_value=None):
-        #         # Every time the logger progress is updated, this function is called 
-        #         percentage = (value / self.bars[bar]['total']) * 100
-        #         if (self.base != int(percentage)):
-        #             context.bot.edit_message_text(chat_id=chat_id, text=f"Converting... {int(percentage)}%", message_id=progress_message.message_id)
-        #             self.base = int(percentage)
-
-
 
         # Simulate uploading action
         context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
@@ -141,10 +118,13 @@ def download_and_send(update, context, selected_format, progress_message):
         context.bot.edit_message_text(chat_id=chat_id, text=f"Uploading...", message_id=progress_message.message_id)
 
         # Send the video file as a document to the user
-        context.bot.send_document(chat_id=chat_id, document=open(video_path, 'rb'))
+        context.bot.send_document(chat_id=chat_id, document=open(output_path, 'rb'))
 
         # Remove temporary files
         os.remove(video_path)
+        os.remove(audio_path)
+        os.remove(output_path)
+
 
         # Remove the progress message
         context.bot.delete_message(chat_id=chat_id, message_id=progress_message.message_id)
@@ -153,6 +133,29 @@ def download_and_send(update, context, selected_format, progress_message):
         # Log the error with traceback
         # Send the error message to the user
         context.bot.send_message(chat_id=chat_id, text=f'Error: Please try again ' + str(e))
+
+
+
+def merge_video_audio(input_video, input_audio, output_file):
+
+    command = [
+        'ffmpeg',
+        '-i', input_video,
+        '-i', input_audio,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-strict', 'experimental',
+        output_file
+    ]
+
+    try:
+
+        subprocess.run(command, check=True)
+        print(f'Merging successful. Output file: {output_file}')
+        return output_file
+    except subprocess.CalledProcessError as e:
+        print(f'Error during merging: {e}')
+
 
 def format_size(size):
     # Convert file size to human-readable format
