@@ -2,10 +2,14 @@ import os
 import subprocess
 import logging
 from dotenv import load_dotenv
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler,CallbackContext
+from telegram import Update,InlineKeyboardMarkup, InlineKeyboardButton
 from pytube import YouTube
 from threading import Thread
+import threading
+import asyncio
+
+
 
 # Load environment variables from .env
 load_dotenv()
@@ -15,19 +19,27 @@ logger = logging.getLogger(__name__)
 
 # Access the variables
 telegram_bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+event = threading.Event()
+
 
 # Dictionary to store user data
 user_data = {}
+async def start(update: Update, context):
+    await  update.message.reply_text("Hello! I'm your YouTube video downloader bot.")
 
-def start(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! I'm your YouTube video downloader bot.")
-
-def download_video(update, context):
+async def download_video(update: Update, context):
+    
+    process_message = await update.message.reply_text(text="Processing your request...",reply_to_message_id=update.message.message_id)
+    # Show a processing message while the request is being processed
     chat_id = update.effective_chat.id
 
+    event_loop = asyncio.get_event_loop()
 
-    # Show a processing message while the request is being processed
-    context.bot.send_message(chat_id=chat_id, text="Processing your request...")
+    loop_id = id(event_loop)
+
+
+# Do something with the event loop
+    print("Current event loop downlaod video:", loop_id )
 
     video_url = update.message.text
 
@@ -43,13 +55,8 @@ def download_video(update, context):
         # getting high bitrate
         audio_streams = yt.streams.filter(only_audio=True,file_extension="mp4").all()
         target_audio = [stream for stream in audio_streams if  stream.abr == "128kbps"  ]
- 
-     
-
         exact_formats =  test + target_audio
-     
-
-
+    
         available_formats = [
             [InlineKeyboardButton(f"{stream.resolution if  stream.resolution  else stream.abr} - { stream.mime_type.split('/')[1]  if stream.resolution else 'mp3' } - {format_size(stream.filesize)}",
                                   callback_data=str(i))]
@@ -61,27 +68,28 @@ def download_video(update, context):
         user_data[chat_id] = {'formats': exact_formats, 'audio': target_audio}
 
         # Create an inline keyboard with clickable buttons for each format
-        reply_markup = InlineKeyboardMarkup(available_formats , row_width=2)
-        message = context.bot.send_message(chat_id=chat_id, text="Select a format:", reply_markup=reply_markup)
+        reply_markup = InlineKeyboardMarkup(available_formats )
+
+
+        message=   await context.bot.edit_message_text(chat_id=chat_id, text="Select a format:",message_id=process_message.message_id, reply_markup=reply_markup)
 
         # Store the message ID for later deletion
         user_data[chat_id]['message_id'] = message.message_id
 
     except Exception as e:
-        context.bot.send_message(chat_id=chat_id, text=f'Error: {str(e)}')
-        logger.error(f"Error processing video download: {str(e)}")
+           await update.message.reply_text(text=f'Error: {str(e)}')
+           logger.error(f"Error processing video download: {str(e)}")
 
 
-def button_click(update, context):
+async def button_click(update: Update, context):
     query = update.callback_query
     chat_id = query.message.chat_id
     selected_format_index = int(query.data)
     # Remove the buttons
-    context.bot.delete_message(chat_id=chat_id, message_id=user_data[chat_id]['message_id'])
+    
 
     # Display a progress bar while downloading the video
-    
-    progress_message = context.bot.send_message(chat_id=chat_id, text="Downloading...")
+    progress_message =  await context.bot.edit_message_text(chat_id=chat_id, text="Downloading...", message_id=user_data[chat_id]['message_id'])
 
     # Retrieve the selected format from user_data
     formats = user_data.get(chat_id, {}).get('formats')
@@ -92,33 +100,60 @@ def button_click(update, context):
     audio_format = user_data.get(chat_id, {}).get('audio')[0]
 
     # Create a separate thread to download the video
-    download_thread = Thread(target=download_and_send, args=(update, context, selected_video_format,audio_format, progress_message))
+    event_loop = asyncio.get_event_loop()
+
+    loop_id = id(event_loop)
+ 
+
+# Do something with the event loop
+    print("Current event button click:", loop_id )
+    await context.bot.send_chat_action(chat_id=chat_id, action='typing')
+    download_thread = Thread(target= download_thread_wrapper, args=(update, context, selected_video_format,audio_format, progress_message,event_loop)
+    )
     download_thread.start()
 
-def download_and_send(update, context, selected_format,audio_format, progress_message):
-    try:
-        chat_id = update.effective_chat.id
 
-        # Simulate downloading action
-        context.bot.send_chat_action(chat_id=chat_id, action='typing')
-        print(selected_format)
-        print(audio_format)
-        # Download the selected video format
+def download_thread_wrapper(update, context, selected_format,audio_format, progress_message,event_loop):
+
+    # Simulate downloading action
+    if(selected_format.abr == "128kbps"):
+        audio_path = selected_format.download(filename="audio_output_file.mp4")
+        output_path = convert_mp4_to_mp3(audio_path,"output.mp3")
+    else:
         video_path = selected_format.download(filename="video_output_file.mp4")
         audio_path = audio_format.download(filename="audio_output_file.mp4")
         output_path = merge_video_audio(video_path,audio_path,"output.mp4")
+    # Download the selected video format
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(download_and_send(update,context,video_path,audio_path,output_path,progress_message,event_loop))
 
 
+async def download_and_send(update: Update, context: CallbackContext, video_path,audio_path,output_path, progress_message,event_loop):
+    try:
+        chat_id = update.effective_chat.id
+        
+        loop = asyncio.get_event_loop()
+        loop_id = id(loop)
+
+
+# Do something with the event loop
+        print("Current event loop:", loop_id )
+        
         # Simulate converting action
-        context.bot.send_chat_action(chat_id=chat_id, action='typing')
+        await context.bot.send_chat_action(chat_id=chat_id, action='typing')
 
         # Simulate uploading action
-        context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
+        await context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
 
-        context.bot.edit_message_text(chat_id=chat_id, text=f"Uploading...", message_id=progress_message.message_id)
-
+        await context.bot.edit_message_text(chat_id=chat_id, text=f"Uploading...", message_id=progress_message.message_id)
+        asyncio.set_event_loop(event_loop)
+        await context.bot.send_document(chat_id=chat_id, document=open(output_path, 'rb'))
         # Send the video file as a document to the user
-        context.bot.send_document(chat_id=chat_id, document=open(output_path, 'rb'))
+
+        
 
         # Remove temporary files
         os.remove(video_path)
@@ -127,12 +162,12 @@ def download_and_send(update, context, selected_format,audio_format, progress_me
 
 
         # Remove the progress message
-        context.bot.delete_message(chat_id=chat_id, message_id=progress_message.message_id)
+        # await context.bot.delete_message(chat_id=chat_id, message_id=progress_message.message_id)
 
     except Exception as e:
         # Log the error with traceback
         # Send the error message to the user
-        context.bot.send_message(chat_id=chat_id, text=f'Error: Please try again ' + str(e))
+        await context.bot.send_message(chat_id=chat_id, text=f'Error: Please try again ' + str(e))
 
 
 
@@ -156,6 +191,17 @@ def merge_video_audio(input_video, input_audio, output_file):
     except subprocess.CalledProcessError as e:
         print(f'Error during merging: {e}')
 
+def convert_mp4_to_mp3(input_file, output_file):
+    try:
+        # Run ffmpeg command
+        subprocess.run(['ffmpeg', '-i', input_file, '-vn', '-acodec', 'libmp3lame', output_file])
+
+        print(f"Conversion successful: {output_file}")
+        return output_file
+
+    except Exception as e:
+        print(f"Error during conversion: {str(e)}")
+
 
 def format_size(size):
     # Convert file size to human-readable format
@@ -166,18 +212,16 @@ def format_size(size):
     return f"{size:.2f} {unit}"
 
 def main():
-    updater = Updater(token=telegram_bot_token, use_context=True)
-    dp = updater.dispatcher
+
+    app = ApplicationBuilder().token(telegram_bot_token).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
+    app.add_handler(CallbackQueryHandler(button_click))
 
     # Log a message when the server is running
     logger.info("Server is running.")
+    app.run_polling()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, download_video))
-    dp.add_handler(CallbackQueryHandler(button_click))
-
-    updater.start_polling()
-    updater.idle()
 
 if __name__ == "__main__":
     main()
