@@ -8,7 +8,8 @@ from pytube import YouTube
 from threading import Thread
 import threading
 import asyncio
-
+import nest_asyncio
+nest_asyncio.apply()
 
 
 # Load environment variables from .env
@@ -32,14 +33,6 @@ async def download_video(update: Update, context):
     process_message = await update.message.reply_text(text="Processing your request...",reply_to_message_id=update.message.message_id)
     # Show a processing message while the request is being processed
     chat_id = update.effective_chat.id
-
-    event_loop = asyncio.get_event_loop()
-
-    loop_id = id(event_loop)
-
-
-# Do something with the event loop
-    print("Current event loop downlaod video:", loop_id )
 
     video_url = update.message.text
 
@@ -101,6 +94,7 @@ async def button_click(update: Update, context):
 
     # Create a separate thread to download the video
     event_loop = asyncio.get_event_loop()
+    print(event_loop)
 
     loop_id = id(event_loop)
  
@@ -111,37 +105,44 @@ async def button_click(update: Update, context):
     download_thread = Thread(target= download_thread_wrapper, args=(update, context, selected_video_format,audio_format, progress_message,event_loop)
     )
     download_thread.start()
+    
 
 
 def download_thread_wrapper(update, context, selected_format,audio_format, progress_message,event_loop):
 
+
+# Do something with the event loop
+    # print("Current event thread wrapper:", loop_id )
+
+    # asyncio.set_event_loop(event_loop)
+
+    title = selected_format.title.replace("|", "_")
+
+
     # Simulate downloading action
     if(selected_format.abr == "128kbps"):
-        audio_path = selected_format.download(filename="audio_output_file.mp4")
-        output_path = convert_mp4_to_mp3(audio_path,"output.mp3")
+        audio_path = selected_format.download(filename=f"{title}+.mp4")
+        output_path = convert_mp4_to_mp3(audio_path,f"{title}_audio_.mp3")
     else:
-        video_path = selected_format.download(filename="video_output_file.mp4")
-        audio_path = audio_format.download(filename="audio_output_file.mp4")
-        output_path = merge_video_audio(video_path,audio_path,"output.mp4")
+        video_path = selected_format.download(filename=f"{title}_video.mp4")
+        audio_path = audio_format.download(filename=f"{title}_audio.mp4")
+        output_path = merge_video_audio(video_path,audio_path, f"{title}_output.mp4")
     # Download the selected video format
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    loop.run_until_complete(download_and_send(update,context,video_path,audio_path,output_path,progress_message,event_loop))
+  
+  
+    event_loop.run_until_complete(download_and_send(update,context,video_path,audio_path,output_path,progress_message,event_loop))
 
 
 async def download_and_send(update: Update, context: CallbackContext, video_path,audio_path,output_path, progress_message,event_loop):
     try:
         chat_id = update.effective_chat.id
-        
-        loop = asyncio.get_event_loop()
-        loop_id = id(loop)
 
+
+ 
 
 # Do something with the event loop
-        print("Current event loop:", loop_id )
-        
+
         # Simulate converting action
         await context.bot.send_chat_action(chat_id=chat_id, action='typing')
 
@@ -149,7 +150,7 @@ async def download_and_send(update: Update, context: CallbackContext, video_path
         await context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
 
         await context.bot.edit_message_text(chat_id=chat_id, text=f"Uploading...", message_id=progress_message.message_id)
-        asyncio.set_event_loop(event_loop)
+    
         await context.bot.send_document(chat_id=chat_id, document=open(output_path, 'rb'))
         # Send the video file as a document to the user
 
@@ -175,6 +176,7 @@ def merge_video_audio(input_video, input_audio, output_file):
 
     command = [
         'ffmpeg',
+        '-y',
         '-i', input_video,
         '-i', input_audio,
         '-c:v', 'copy',
