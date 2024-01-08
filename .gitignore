@@ -1,5 +1,5 @@
 v1/
 myenv/
-__pycache__
 .env
 youtube_bot.pem
+__pycache__/
