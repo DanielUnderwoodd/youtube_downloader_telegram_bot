@@ -10,7 +10,9 @@ import threading
 import asyncio
 import nest_asyncio
 nest_asyncio.apply()
+from queue import Queue
 
+upload_queue = Queue()
 
 # Load environment variables from .env
 load_dotenv()
@@ -29,7 +31,7 @@ async def start(update: Update, context):
     await  update.message.reply_text("Hello! I'm your YouTube video downloader bot.")
 
 async def download_video(update: Update, context):
-    
+
     process_message = await update.message.reply_text(text="Processing your request...",reply_to_message_id=update.message.message_id)
     # Show a processing message while the request is being processed
     chat_id = update.effective_chat.id
@@ -102,10 +104,9 @@ async def button_click(update: Update, context):
 # Do something with the event loop
     print("Current event button click:", loop_id )
     await context.bot.send_chat_action(chat_id=chat_id, action='typing')
-    download_thread = Thread(target= download_thread_wrapper, args=(update, context, selected_video_format,audio_format, progress_message,event_loop)
-    )
+    download_thread = Thread(target= download_thread_wrapper, args=(update, context, selected_video_format,audio_format, progress_message,event_loop))
+    # upload_thread = Thread(target=upload_worker, args=(upload_queue,))
     download_thread.start()
-    
 
 
 def download_thread_wrapper(update, context, selected_format,audio_format, progress_message,event_loop):
@@ -138,9 +139,6 @@ async def download_and_send(update: Update, context: CallbackContext, video_path
     try:
         chat_id = update.effective_chat.id
 
-
- 
-
 # Do something with the event loop
 
         # Simulate converting action
@@ -150,8 +148,12 @@ async def download_and_send(update: Update, context: CallbackContext, video_path
         await context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
 
         await context.bot.edit_message_text(chat_id=chat_id, text=f"Uploading...", message_id=progress_message.message_id)
-    
-        await context.bot.send_document(chat_id=chat_id, document=open(output_path, 'rb'))
+        upload_queue.put((chat_id, output_path,context))
+        await upload_worker(upload_queue)
+
+        
+
+
         # Send the video file as a document to the user
 
         
@@ -160,6 +162,7 @@ async def download_and_send(update: Update, context: CallbackContext, video_path
         os.remove(video_path)
         os.remove(audio_path)
         os.remove(output_path)
+
 
 
         # Remove the progress message
@@ -213,6 +216,16 @@ def format_size(size):
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
+async def upload_worker(upload_queue):
+    print("running")
+    while True:
+        chat_id, output_path,context =  upload_queue.get()
+        with open(output_path
+                  , 'rb') as document_file:
+             asyncio.run(context.bot.send_document(chat_id=chat_id, document=document_file))
+
+        upload_queue.task_done()
+
 def main():
 
     app = ApplicationBuilder().token(telegram_bot_token).build()
@@ -223,7 +236,10 @@ def main():
     # Log a message when the server is running
     logger.info("Server is running.")
     app.run_polling()
+    # Start the upload worker thread
+     
 
 
 if __name__ == "__main__":
     main()
+    
