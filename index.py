@@ -124,18 +124,21 @@ def download_thread_wrapper(update, context, selected_format,audio_format, progr
     if(selected_format.abr == "128kbps"):
         audio_path = selected_format.download(filename=f"{title}+.mp4")
         output_path = convert_mp4_to_mp3(audio_path,f"{title}_audio_.mp3")
+        os.remove(audio_path)
     else:
         video_path = selected_format.download(filename=f"{title}_video.mp4")
         audio_path = audio_format.download(filename=f"{title}_audio.mp4")
         output_path = merge_video_audio(video_path,audio_path, f"{title}_output.mp4")
+        os.remove(video_path)
+        os.remove(audio_path)
     # Download the selected video format
 
   
   
-    event_loop.run_until_complete(download_and_send(update,context,video_path,audio_path,output_path,progress_message,event_loop))
+    event_loop.run_until_complete(download_and_send(update,context,output_path,progress_message))
 
 
-async def download_and_send(update: Update, context: CallbackContext, video_path,audio_path,output_path, progress_message,event_loop):
+async def download_and_send(update, context ,output_path, progress_message):
     try:
         chat_id = update.effective_chat.id
 
@@ -148,6 +151,7 @@ async def download_and_send(update: Update, context: CallbackContext, video_path
         await context.bot.send_chat_action(chat_id=chat_id, action='upload_video')
 
         await context.bot.edit_message_text(chat_id=chat_id, text=f"Uploading...", message_id=progress_message.message_id)
+
         upload_queue.put((chat_id, output_path,context))
         await upload_worker(upload_queue)
 
@@ -159,9 +163,7 @@ async def download_and_send(update: Update, context: CallbackContext, video_path
         
 
         # Remove temporary files
-        os.remove(video_path)
-        os.remove(audio_path)
-        os.remove(output_path)
+
 
 
 
@@ -199,7 +201,7 @@ def merge_video_audio(input_video, input_audio, output_file):
 def convert_mp4_to_mp3(input_file, output_file):
     try:
         # Run ffmpeg command
-        subprocess.run(['ffmpeg', '-i', input_file, '-vn', '-acodec', 'libmp3lame', output_file])
+        subprocess.run(['ffmpeg','-y','-i', input_file, '-vn', '-acodec', 'libmp3lame', output_file])
 
         print(f"Conversion successful: {output_file}")
         return output_file
@@ -223,7 +225,7 @@ async def upload_worker(upload_queue):
         with open(output_path
                   , 'rb') as document_file:
              asyncio.run(context.bot.send_document(chat_id=chat_id, document=document_file))
-
+        os.remove(output_path)
         upload_queue.task_done()
 
 def main():
