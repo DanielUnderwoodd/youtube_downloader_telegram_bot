@@ -3,3 +3,4 @@ myenv/
 .env
 youtube_bot.pem
 __pycache__/
+.DS_Store
